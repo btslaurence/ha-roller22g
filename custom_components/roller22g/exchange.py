@@ -44,7 +44,7 @@ HEADER = HEADER_58
 CONNECT_ATTEMPTS = 3
 SETTLE_SECONDS = 0.3
 STATUS_TIMEOUT_SECONDS = 2.0
-AFTER_WRITE_SECONDS = 0.3
+AFTER_WRITE_SECONDS = 0.1
 AFTER_STOP_SECONDS = 1.0
 
 
@@ -184,9 +184,10 @@ async def _async_run(
     except (BleakError, TimeoutError) as err:
         result["error"] = f"{type(err).__name__}: {err}"
     finally:
+        # Disconnecting ends the notification subscription with it, so there is
+        # no separate unsubscribe: that would only keep the link up longer.
+        result["closing"] = dt_util.now().strftime("%H:%M:%S.%f")[:-3]
         try:
-            if client.is_connected:
-                await client.stop_notify(RESPONSE_UUID)
             await client.disconnect()
         except (BleakError, TimeoutError) as err:
             _LOGGER.debug("%s: closing the link failed: %s", address, err)

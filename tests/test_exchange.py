@@ -36,7 +36,7 @@ class Motor:
         self._notify = cb
 
     async def stop_notify(self, uuid):
-        self._notify = None
+        raise AssertionError("the link is closed without a separate unsubscribe")
 
     async def disconnect(self):
         self.is_connected = False
@@ -89,6 +89,7 @@ async def test_goto_is_one_status_read_and_one_command(hass):
     assert result["position"] == 100.0
     assert [step["step"] for step in result["steps"]] == ["status", "goto"]
     assert all("at" in step for step in result["steps"])
+    assert "closing" in result and "finished" in result
     assert not motor.is_connected
 
 
