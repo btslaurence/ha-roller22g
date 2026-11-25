@@ -26,7 +26,9 @@ class Motor:
     treats a go-to value as distance from the top instead of the reported scale.
     """
 
-    def __init__(self, raw=1000, accepts=HEADER_58, inverted=False, silent=False):
+    def __init__(self, raw=1000, accepts=HEADER_58, inverted=False, silent=False, on_read=None):
+        self.on_read = on_read
+        self.reads = 0
         self.raw = raw
         self.target = raw
         self.accepts = accepts
@@ -53,6 +55,9 @@ class Motor:
         self.written.append(frame)
         header, opcode = frame[:4], frame[4]
         if opcode == 0xD1:
+            self.reads += 1
+            if self.on_read is not None:
+                self.on_read(self.reads)
             step = max(-40, min(40, self.target - self.raw))
             self.raw += step
             if not self.silent:
@@ -76,6 +81,7 @@ class Motor:
 def fast(monkeypatch):
     monkeypatch.setattr(exchange, "SETTLE_SECONDS", 0)
     monkeypatch.setattr(exchange, "REPLY_WAIT_SECONDS", 0)
+    monkeypatch.setattr(exchange, "POLL_WAIT_SECONDS", 0)
     monkeypatch.setattr(exchange, "MIN_OBSERVE_SECONDS", 0)
     monkeypatch.setattr(exchange, "MOVE_TIMEOUT_SECONDS", 2)
 
@@ -166,3 +172,25 @@ async def test_device_not_seen(hass):
 def test_goto_rejects_out_of_range():
     with pytest.raises(ValueError):
         build_goto(HEADER_58, 101)
+
+
+async def test_stop_request_during_move_stops_the_motor(hass):
+    import asyncio
+
+    event = asyncio.Event()
+    # Ask for the stop once the third status read has been answered.
+    motor = Motor(on_read=lambda count: event.set() if count == 3 else None)
+    result = await _run(
+        hass, motor, lambda h: exchange.async_goto(h, ADDRESS, "58", 50, event)
+    )
+
+    assert result["outcome"] == "stopped"
+    assert result["stopped_by_request"] is True
+    assert result["guard_tripped"] is False
+    assert motor.written.count(build_stop(HEADER_58)) == 1
+    assert motor.target == motor.raw
+    assert 50 < result["position_after"] < 100
+    assert result["position_after"] == motor.raw / 10
+    names = [step["step"] for step in result["steps"]]
+    assert "stop_requested" in names
+    assert all("at" in step for step in result["steps"])

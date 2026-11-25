@@ -28,6 +28,7 @@ from .const import (
     OUTCOME_DONE,
     OUTCOME_GUARD_STOP,
     OUTCOME_NO_STATUS,
+    OUTCOME_STOPPED,
     RESPONSE_UUID,
     VERDICT_CONNECT_FAILED,
     VERDICT_ERROR,
@@ -40,6 +41,7 @@ _LOGGER = logging.getLogger(__name__)
 CONNECT_ATTEMPTS = 3
 SETTLE_SECONDS = 1.0
 REPLY_WAIT_SECONDS = 1.0
+POLL_WAIT_SECONDS = 0.5
 MOVE_TIMEOUT_SECONDS = 40.0
 MIN_OBSERVE_SECONDS = 5.0
 STABLE_READS = 3
@@ -66,6 +68,7 @@ class _Link:
     async def send(self, name: str, frame: bytes, wait: float) -> dict[str, Any]:
         """Write one frame, wait, and record what came back."""
         sent_at = time.monotonic()
+        clock = dt_util.now().strftime("%H:%M:%S.%f")[:-3]
         write_error: str | None = None
         _LOGGER.info("%s: tx %s (%s)", self.address, frame.hex(" "), name)
         try:
@@ -82,7 +85,13 @@ class _Link:
             for stamp, data in self._rx
         ]
         self._rx.clear()
-        record = {"step": name, "tx": frame.hex(" "), "write_error": write_error, "rx": rx}
+        record = {
+            "step": name,
+            "at": clock,
+            "tx": frame.hex(" "),
+            "write_error": write_error,
+            "rx": rx,
+        }
         self.records.append(record)
         return record
 
@@ -105,7 +114,12 @@ def _outside(position: float, start: float, target: float) -> bool:
 
 
 async def _async_run(
-    hass: HomeAssistant, address: str, header_key: str, action: str, target: int | None
+    hass: HomeAssistant,
+    address: str,
+    header_key: str,
+    action: str,
+    target: int | None,
+    stop_event: asyncio.Event | None = None,
 ) -> dict[str, Any]:
     header = HEADERS[header_key]
     result: dict[str, Any] = {
@@ -119,6 +133,7 @@ async def _async_run(
         "position_before": None,
         "position_after": None,
         "guard_tripped": False,
+        "stopped_by_request": False,
         "steps": [],
     }
 
@@ -170,7 +185,12 @@ async def _async_run(
             if not client.is_connected:
                 result["error"] = "link dropped while watching the move"
                 break
-            position = position_of(await link.send("status_poll", status, REPLY_WAIT_SECONDS))
+            if stop_event is not None and stop_event.is_set():
+                await link.send("stop_requested", build_stop(header), REPLY_WAIT_SECONDS)
+                result["stopped_by_request"] = True
+                last = await _async_settled(link, status, last)
+                break
+            position = position_of(await link.send("status_poll", status, POLL_WAIT_SECONDS))
             if position is None:
                 continue
             if _outside(position, before, target):
@@ -189,6 +209,8 @@ async def _async_run(
         result["position_after"] = last
         if result["guard_tripped"]:
             result["outcome"] = OUTCOME_GUARD_STOP
+        elif result["stopped_by_request"]:
+            result["outcome"] = OUTCOME_STOPPED
         elif last is None:
             result["outcome"] = OUTCOME_NO_STATUS
         else:
@@ -208,13 +230,34 @@ async def _async_run(
         _LOGGER.info("%s: %s outcome %s", address, action, result["outcome"])
 
 
+async def _async_settled(
+    link: _Link, status: bytes, last: float | None
+) -> float | None:
+    """Read the position until two consecutive reads agree (at most six)."""
+    for _ in range(6):
+        position = position_of(await link.send("status_after_stop", status, REPLY_WAIT_SECONDS))
+        if position is not None and position == last:
+            return position
+        if position is not None:
+            last = position
+    return last
+
+
 async def async_stop(hass: HomeAssistant, address: str, header_key: str) -> dict[str, Any]:
     """Send stop and read the position."""
     return await _async_run(hass, address, header_key, "stop", None)
 
 
 async def async_goto(
-    hass: HomeAssistant, address: str, header_key: str, percent: int
+    hass: HomeAssistant,
+    address: str,
+    header_key: str,
+    percent: int,
+    stop_event: asyncio.Event | None = None,
 ) -> dict[str, Any]:
-    """Move to a position (100 = fully raised) and watch it get there."""
-    return await _async_run(hass, address, header_key, "goto", percent)
+    """Move to a position (100 = fully raised) and watch it get there.
+
+    Setting stop_event while the move is being watched sends a stop frame on
+    the same connection.
+    """
+    return await _async_run(hass, address, header_key, "goto", percent, stop_event)

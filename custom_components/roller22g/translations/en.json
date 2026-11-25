@@ -51,6 +51,7 @@
           "not_run": "Not run",
           "running": "Running",
           "done": "Done",
+          "stopped": "Stopped on request",
           "no_status": "No status reply",
           "guard_stop": "Stopped by guard",
           "device_not_found": "Motor not seen",

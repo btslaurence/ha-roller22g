@@ -46,5 +46,5 @@ class TargetPosition(Roller22GEntity, NumberEntity):
         return self._data.position
 
     async def async_set_native_value(self, value: float) -> None:
-        """Move the blind."""
-        await self._data.async_goto(round(value))
+        """Start moving the blind; the result shows up on the result sensor."""
+        self._data.async_start_goto(round(value))

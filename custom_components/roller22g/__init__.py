@@ -7,6 +7,7 @@ probe, plus stop and go-to-position with position feedback.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -24,6 +25,8 @@ from .const import (
 )
 from .exchange import async_goto, async_stop
 from .probe import async_run_probe
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
     Platform.BUTTON,
@@ -46,6 +49,7 @@ class Roller22GData:
     outcome: str | None = None
     exchange: dict[str, Any] | None = None
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _stop_event: asyncio.Event = field(default_factory=asyncio.Event)
     _listeners: list[Callable[[], None]] = field(default_factory=list)
 
     @callback
@@ -88,14 +92,34 @@ class Roller22GData:
 
 
     async def async_stop(self) -> None:
-        """Send stop with the selected header."""
+        """Stop the motor.
+
+        If a move is being watched, the stop goes out on that connection;
+        otherwise a new connection is opened for it.
+        """
+        if self._lock.locked():
+            self._stop_event.set()
+            return
         await self._async_exchange(async_stop(self.hass, self.address, self.header))
 
     async def async_goto(self, percent: int) -> None:
         """Move to a position with the selected header."""
+        self._stop_event.clear()
         await self._async_exchange(
-            async_goto(self.hass, self.address, self.header, percent)
+            async_goto(self.hass, self.address, self.header, percent, self._stop_event)
         )
+
+    @callback
+    def async_start_goto(self, percent: int) -> None:
+        """Start a move in the background so the caller is not held up."""
+
+        async def _run() -> None:
+            try:
+                await self.async_goto(percent)
+            except Exception:
+                _LOGGER.exception("%s: move to %s failed", self.address, percent)
+
+        self.hass.async_create_background_task(_run(), f"roller22g move {self.address}")
 
     async def _async_exchange(self, coro: Any) -> None:
         if self._lock.locked():

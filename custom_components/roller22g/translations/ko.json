@@ -51,6 +51,7 @@
           "not_run": "실행 전",
           "running": "실행 중",
           "done": "완료",
+          "stopped": "요청에 의해 정지",
           "no_status": "상태 응답 없음",
           "guard_stop": "보호 정지",
           "device_not_found": "모터가 수신되지 않음",
