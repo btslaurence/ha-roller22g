@@ -1,0 +1,47 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "ROLLER22G 모터 추가",
+        "description": "모터의 블루투스 주소를 입력해 주십시오. 추가하는 과정에서는 모터로 아무것도 보내지 않습니다.\n\n현재 수신되는 모터: {seen}",
+        "data": {
+          "address": "블루투스 주소"
+        }
+      },
+      "confirm": {
+        "title": "ROLLER22G 모터 추가",
+        "description": "{address} 모터를 추가하시겠습니까? 추가하는 과정에서는 모터로 아무것도 보내지 않습니다."
+      }
+    },
+    "error": {
+      "invalid_address": "AA:BB:CC:DD:EE:FF 형식으로 입력해 주십시오."
+    },
+    "abort": {
+      "already_configured": "이미 등록된 모터입니다."
+    }
+  },
+  "entity": {
+    "button": {
+      "probe": {
+        "name": "읽기 전용 검증 실행"
+      }
+    },
+    "sensor": {
+      "probe_result": {
+        "name": "검증 결과",
+        "state": {
+          "not_run": "실행 전",
+          "running": "실행 중",
+          "match_header_58": "상태 수신 (헤더 58)",
+          "match_header_78": "상태 수신 (헤더 78)",
+          "login_only": "로그인만 성공, 상태 없음",
+          "no_response": "응답 없음",
+          "device_not_found": "모터가 수신되지 않음",
+          "connect_failed": "연결 실패",
+          "error": "오류"
+        }
+      }
+    }
+  }
+}

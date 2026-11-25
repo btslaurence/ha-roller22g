@@ -1,0 +1,47 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "Add a ROLLER22G motor",
+        "description": "Enter the Bluetooth address of the motor. Nothing is sent to the motor when it is added.\n\nMotors currently seen: {seen}",
+        "data": {
+          "address": "Bluetooth address"
+        }
+      },
+      "confirm": {
+        "title": "Add a ROLLER22G motor",
+        "description": "Add the motor at {address}? Nothing is sent to the motor when it is added."
+      }
+    },
+    "error": {
+      "invalid_address": "Enter an address in the form AA:BB:CC:DD:EE:FF."
+    },
+    "abort": {
+      "already_configured": "This motor is already configured."
+    }
+  },
+  "entity": {
+    "button": {
+      "probe": {
+        "name": "Run read-only probe"
+      }
+    },
+    "sensor": {
+      "probe_result": {
+        "name": "Probe result",
+        "state": {
+          "not_run": "Not run",
+          "running": "Running",
+          "match_header_58": "Status received (header 58)",
+          "match_header_78": "Status received (header 78)",
+          "login_only": "Login accepted, no status",
+          "no_response": "No response",
+          "device_not_found": "Motor not seen",
+          "connect_failed": "Connection failed",
+          "error": "Error"
+        }
+      }
+    }
+  }
+}
