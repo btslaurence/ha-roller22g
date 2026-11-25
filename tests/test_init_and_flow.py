@@ -74,6 +74,9 @@ class FakeMotor:
         self.position = position
         self.calls = []
         self.fail_command = False
+        self.fail_stop = False
+        # When set, a command waits here, as a slow Bluetooth exchange would.
+        self.gate = None
 
     async def read(self, hass, address):
         self.calls.append(("read",))
@@ -81,6 +84,8 @@ class FakeMotor:
 
     async def goto(self, hass, address, percent):
         self.calls.append(("goto", percent))
+        if self.gate is not None:
+            await self.gate.wait()
         if self.fail_command:
             return _record(None, outcome="connect_failed", error="nope")
         before = self.position
@@ -89,6 +94,8 @@ class FakeMotor:
 
     async def stop(self, hass, address):
         self.calls.append(("stop",))
+        if self.fail_stop:
+            return _record(None, outcome="connect_failed", error="nope")
         return _record(self.position, command_sent=True)
 
 
@@ -102,6 +109,7 @@ def motor(monkeypatch):
     monkeypatch.setattr(integration, "SPEED_DOWN", 100000.0)
     monkeypatch.setattr(integration, "SPEED_UP", 100000.0)
     monkeypatch.setattr(integration, "RECHECK_MIN", 0.0)
+    monkeypatch.setattr(integration, "GUARD_SECONDS", 0.0)
     return fake
 
 
@@ -297,3 +305,120 @@ async def test_user_flow_wins_over_a_waiting_discovery_flow(hass):
         await hass.async_block_till_done()
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+
+
+async def test_move_shows_at_once_and_repeated_taps_send_one_command(hass, motor, monkeypatch):
+    monkeypatch.setattr(integration, "SPEED_DOWN", 1.0)
+    monkeypatch.setattr(integration, "GUARD_SECONDS", 2.0)
+    entry = await _setup(hass)
+    data = entry.runtime_data
+    motor.calls.clear()
+    motor.gate = asyncio.Event()
+
+    first = hass.async_create_task(
+        hass.services.async_call("cover", "close_cover", {"entity_id": COVER}, blocking=True)
+    )
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    # Nothing has reached the motor yet, the state already says so.
+    assert hass.states.get(COVER).state == "closing"
+    assert hass.states.get(COVER).attributes["current_position"] == 100
+
+    # More taps while it is being sent: the same move again, and a stop.
+    await hass.services.async_call("cover", "close_cover", {"entity_id": COVER}, blocking=True)
+    await hass.services.async_call("cover", "stop_cover", {"entity_id": COVER}, blocking=True)
+    await hass.services.async_call(
+        "cover", "set_cover_position", {"entity_id": COVER, "position": 5}, blocking=True
+    )
+
+    motor.gate.set()
+    await first
+    assert motor.calls == [("goto", 0)]
+    assert hass.states.get(COVER).state == "closing"
+    assert data.target == 0.0
+    data.async_shutdown()
+
+
+async def test_command_after_the_guard_is_accepted(hass, motor, monkeypatch):
+    monkeypatch.setattr(integration, "SPEED_DOWN", 1.0)
+    monkeypatch.setattr(integration, "GUARD_SECONDS", 2.0)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(integration, "_now", lambda: clock["now"])
+    entry = await _setup(hass)
+    motor.calls.clear()
+
+    await hass.services.async_call("cover", "close_cover", {"entity_id": COVER}, blocking=True)
+    clock["now"] += 1.9
+    await hass.services.async_call("cover", "stop_cover", {"entity_id": COVER}, blocking=True)
+    assert motor.calls == [("goto", 0)]
+
+    clock["now"] += 0.2
+    motor.position = 97.0
+    await hass.services.async_call("cover", "stop_cover", {"entity_id": COVER}, blocking=True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert motor.calls == [("goto", 0), ("stop",)]
+    assert entry.runtime_data.moving is False
+    assert hass.states.get(COVER).attributes["current_position"] == 97
+
+
+async def test_same_target_is_not_sent_twice_while_moving(hass, motor, monkeypatch):
+    monkeypatch.setattr(integration, "SPEED_DOWN", 1.0)
+    entry = await _setup(hass)
+    motor.calls.clear()
+
+    await hass.services.async_call("cover", "close_cover", {"entity_id": COVER}, blocking=True)
+    await hass.services.async_call("cover", "close_cover", {"entity_id": COVER}, blocking=True)
+    await hass.services.async_call(
+        "cover", "set_cover_position", {"entity_id": COVER, "position": 0}, blocking=True
+    )
+    assert motor.calls == [("goto", 0)]
+    entry.runtime_data.async_shutdown()
+
+
+async def test_new_target_while_sending_replaces_the_old_one(hass, motor, monkeypatch):
+    monkeypatch.setattr(integration, "SPEED_DOWN", 1.0)
+    monkeypatch.setattr(integration, "SPEED_UP", 1.0)
+    entry = await _setup(hass)
+    data = entry.runtime_data
+    motor.calls.clear()
+    motor.gate = asyncio.Event()
+
+    first = hass.async_create_task(data.async_move(0))
+    await asyncio.sleep(0)
+    second = hass.async_create_task(data.async_move(40))
+    await asyncio.sleep(0)
+    motor.gate.set()
+    await first
+    await second
+
+    assert motor.calls == [("goto", 0), ("goto", 40)]
+    assert data.target == 40.0
+    # Exactly one follow-up read is waiting, for the newer move.
+    checks = [task for task in asyncio.all_tasks() if "roller22g check" in task.get_name()]
+    assert len(checks) == 1
+    data.async_shutdown()
+
+
+async def test_failed_stop_keeps_following_the_move(hass, motor, monkeypatch):
+    monkeypatch.setattr(integration, "SPEED_DOWN", 1000.0)
+    entry = await _setup(hass)
+    data = entry.runtime_data
+    motor.calls.clear()
+    motor.gate = asyncio.Event()
+
+    move = hass.async_create_task(data.async_move(0))
+    await asyncio.sleep(0)
+    motor.fail_stop = True
+    stop = hass.async_create_task(data.async_stop())
+    await asyncio.sleep(0)
+    motor.gate.set()
+    await move
+    with pytest.raises(HomeAssistantError):
+        await stop
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    # The stop never reached the motor, so the blind went on to the bottom.
+    assert data.moving is False
+    assert hass.states.get(COVER).state == "closed"
+    assert motor.calls[:2] == [("goto", 0), ("stop",)]
+    assert set(motor.calls[2:]) == {("read",)}

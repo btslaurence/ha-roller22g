@@ -47,6 +47,9 @@ RECHECK_MIN = 3.0
 RECHECK_MAX = 60.0
 MAX_CHECKS = 6
 TICK = timedelta(seconds=1)
+# A command arriving this soon after the previous one is dropped, so that
+# repeated taps on a toggle do not turn into "move, then stop".
+GUARD_SECONDS = 2.0
 INITIAL_READ_ATTEMPTS = 4
 INITIAL_READ_RETRY = 15.0
 
@@ -84,6 +87,10 @@ class Roller22GData:
         self._listeners: list[Callable[[], None]] = []
         self._check_task: asyncio.Task[None] | None = None
         self._untick: CALLBACK_TYPE | None = None
+        # Each accepted command gets a number; work belonging to an older
+        # command leaves the state to the newer one.
+        self._generation = 0
+        self._accepted_at: float | None = None
 
     # Listeners -----------------------------------------------------------
 
@@ -121,8 +128,11 @@ class Roller22GData:
     @property
     def estimated_position(self) -> float | None:
         """Reported position, or an estimate by elapsed time while moving."""
-        if not self.moving or self._move_from is None or self._move_started is None:
+        if not self.moving or self._move_from is None:
             return self.position
+        if self._move_started is None:
+            # Accepted, not yet sent to the motor.
+            return self._move_from
         total = travel_seconds(self._move_from, self.target)
         if total <= 0:
             return self.target
@@ -171,6 +181,25 @@ class Roller22GData:
             self._check_task.cancel()
         self._check_task = None
 
+    @callback
+    def _accept(self, what: str) -> int | None:
+        """Number a new command, or return None when it comes too soon."""
+        now = _now()
+        if self._accepted_at is not None and now - self._accepted_at < GUARD_SECONDS:
+            _LOGGER.debug("%s: %s ignored, too soon after the previous command", self.address, what)
+            return None
+        self._accepted_at = now
+        self._generation += 1
+        self._cancel_check()
+        return self._generation
+
+    @callback
+    def _start_check(self, generation: int, target: float | None, delay: float) -> None:
+        self._check_task = self.hass.async_create_background_task(
+            self._async_check(generation, target, delay),
+            f"roller22g check {self.address}",
+        )
+
     async def async_refresh(self) -> None:
         """Read the position from the motor."""
         record = await self._async_exchange(async_read(self.hass, self.address))
@@ -180,32 +209,51 @@ class Roller22GData:
 
     async def async_move(self, target: int) -> None:
         """Send the motor to a position; it stops there by itself."""
-        self._cancel_check()
+        if self.target == float(target):
+            _LOGGER.debug("%s: already moving to %s", self.address, target)
+            return
+        was_moving = self.moving
+        generation = self._accept(f"move to {target}")
+        if generation is None:
+            return
+
+        # Show the move at once; the exchange takes a few seconds.
+        self._move_from = self.estimated_position
+        self._move_started = None
+        self.target = float(target)
+        self._notify()
+
         record = await self._async_exchange(async_goto(self.hass, self.address, target))
         if record["position"] is not None:
             self.position = record["position"]
+        if generation != self._generation:
+            # A newer command took over while this one was being sent.
+            return
         if not record["command_sent"]:
+            self._accepted_at = None
             self._end_move()
             self._notify()
+            if was_moving:
+                # The earlier move may still be running; find where it ends.
+                self._start_check(generation, None, RECHECK_MIN)
             raise HomeAssistantError(
                 f"Could not send the move to {self.address}: "
                 f"{record['error'] or record['outcome']}"
             )
 
         start = self.position if self.position is not None else float(target)
-        self.target = float(target)
         self._move_from = start
         self._move_started = _now()
         if self._untick is None:
             self._untick = async_track_time_interval(self.hass, self._notify, TICK)
         self._notify()
-        self._check_task = self.hass.async_create_background_task(
-            self._async_check(float(target), travel_seconds(start, target) + CHECK_MARGIN),
-            f"roller22g check {self.address}",
-        )
+        self._start_check(generation, float(target), travel_seconds(start, target) + CHECK_MARGIN)
 
-    async def _async_check(self, target: float, delay: float) -> None:
-        """After the estimated travel time, read where the motor is."""
+    async def _async_check(self, generation: int, target: float | None, delay: float) -> None:
+        """After the estimated travel time, read where the motor is.
+
+        Without a target, read until two readings agree.
+        """
         previous: float | None = None
         try:
             for _ in range(MAX_CHECKS):
@@ -216,29 +264,52 @@ class Roller22GData:
                     delay = RECHECK_MIN
                     continue
                 self.position = position
-                if abs(position - target) <= ARRIVED_TOLERANCE or position == previous:
-                    # Arrived, or stopped short of the target.
+                arrived = target is not None and abs(position - target) <= ARRIVED_TOLERANCE
+                if arrived or position == previous:
+                    # Arrived, or no longer moving.
                     break
                 previous = position
-                delay = min(
-                    RECHECK_MAX, max(RECHECK_MIN, travel_seconds(position, target) + 1.0)
-                )
+                delay = RECHECK_MIN
+                if target is not None:
+                    delay = min(RECHECK_MAX, max(delay, travel_seconds(position, target) + 1.0))
         except asyncio.CancelledError:
             raise
         except Exception:
             _LOGGER.exception("%s: checking the position failed", self.address)
+        if generation != self._generation:
+            return
         self._check_task = None
         self._end_move()
         self._notify()
 
     async def async_stop(self) -> None:
         """Stop the motor and read where it ended up."""
-        self._cancel_check()
+        generation = self._accept("stop")
+        if generation is None:
+            return
         record = await self._async_exchange(async_stop(self.hass, self.address))
-        if record["command_sent"]:
-            self._end_move()
         if record["position"] is not None:
             self.position = record["position"]
+        if generation != self._generation:
+            return
+        if record["command_sent"]:
+            self._end_move()
+        else:
+            self._accepted_at = None
+            if self.target is not None:
+                # Still believed to be moving: keep following it to its end.
+                remaining = 0.0
+                if self._move_started is None:
+                    self._move_started = _now()
+                if self._move_from is not None:
+                    remaining = max(
+                        0.0,
+                        travel_seconds(self._move_from, self.target)
+                        - (_now() - self._move_started),
+                    )
+                if self._untick is None:
+                    self._untick = async_track_time_interval(self.hass, self._notify, TICK)
+                self._start_check(generation, self.target, remaining + CHECK_MARGIN)
         self._notify()
         if not record["command_sent"]:
             raise HomeAssistantError(
