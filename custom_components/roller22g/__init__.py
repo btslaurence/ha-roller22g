@@ -1,7 +1,7 @@
 """ROLLER22G roller blind motors over Bluetooth LE.
 
-This version only verifies the protocol: it can run a read-only probe against
-a motor and expose what the motor answered. It cannot move a blind.
+This version is for verifying the protocol against a real motor: a read-only
+probe, plus stop and go-to-position with position feedback.
 """
 
 from __future__ import annotations
@@ -15,10 +15,22 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 
-from .const import CONF_ADDRESS, VERDICT_ERROR, VERDICT_RUNNING
+from .const import (
+    CONF_ADDRESS,
+    DEFAULT_HEADER,
+    OUTCOME_RUNNING,
+    VERDICT_ERROR,
+    VERDICT_RUNNING,
+)
+from .exchange import async_goto, async_stop
 from .probe import async_run_probe
 
-PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.BUTTON,
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.SENSOR,
+]
 
 
 @dataclass
@@ -29,6 +41,10 @@ class Roller22GData:
     address: str
     verdict: str | None = None
     result: dict[str, Any] | None = None
+    header: str = DEFAULT_HEADER
+    position: float | None = None
+    outcome: str | None = None
+    exchange: dict[str, Any] | None = None
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _listeners: list[Callable[[], None]] = field(default_factory=list)
 
@@ -66,6 +82,43 @@ class Roller22GData:
                     "steps": [],
                 }
                 self.verdict = VERDICT_ERROR
+                raise
+            finally:
+                self._notify()
+
+
+    async def async_stop(self) -> None:
+        """Send stop with the selected header."""
+        await self._async_exchange(async_stop(self.hass, self.address, self.header))
+
+    async def async_goto(self, percent: int) -> None:
+        """Move to a position with the selected header."""
+        await self._async_exchange(
+            async_goto(self.hass, self.address, self.header, percent)
+        )
+
+    async def _async_exchange(self, coro: Any) -> None:
+        if self._lock.locked():
+            coro.close()
+            return
+        async with self._lock:
+            self.outcome = OUTCOME_RUNNING
+            self._notify()
+            try:
+                self.exchange = await coro
+                self.outcome = self.exchange["outcome"]
+                if self.exchange["position_after"] is not None:
+                    self.position = self.exchange["position_after"]
+                elif self.exchange["position_before"] is not None:
+                    self.position = self.exchange["position_before"]
+            except Exception as err:
+                self.exchange = {
+                    "address": self.address,
+                    "outcome": VERDICT_ERROR,
+                    "error": f"{type(err).__name__}: {err}",
+                    "steps": [],
+                }
+                self.outcome = VERDICT_ERROR
                 raise
             finally:
                 self._notify()

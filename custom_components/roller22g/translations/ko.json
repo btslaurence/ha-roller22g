@@ -25,6 +25,9 @@
     "button": {
       "probe": {
         "name": "읽기 전용 검증 실행"
+      },
+      "stop": {
+        "name": "정지"
       }
     },
     "sensor": {
@@ -41,6 +44,29 @@
           "connect_failed": "연결 실패",
           "error": "오류"
         }
+      },
+      "last_exchange": {
+        "name": "마지막 명령 결과",
+        "state": {
+          "not_run": "실행 전",
+          "running": "실행 중",
+          "done": "완료",
+          "no_status": "상태 응답 없음",
+          "guard_stop": "보호 정지",
+          "device_not_found": "모터가 수신되지 않음",
+          "connect_failed": "연결 실패",
+          "error": "오류"
+        }
+      }
+    },
+    "number": {
+      "target_position": {
+        "name": "위치"
+      }
+    },
+    "select": {
+      "command_header": {
+        "name": "명령 헤더"
       }
     }
   }

@@ -35,3 +35,25 @@ VERDICTS = [
     VERDICT_CONNECT_FAILED,
     VERDICT_ERROR,
 ]
+
+# Command headers that can be selected for motion frames.
+HEADERS = {"58": bytes.fromhex("ff58ea41"), "78": bytes.fromhex("ff78ea41")}
+DEFAULT_HEADER = "58"
+
+# Outcomes reported for a stop or go-to-position exchange.
+OUTCOME_NOT_RUN = "not_run"
+OUTCOME_RUNNING = "running"
+OUTCOME_DONE = "done"
+OUTCOME_NO_STATUS = "no_status"
+OUTCOME_GUARD_STOP = "guard_stop"
+
+OUTCOMES = [
+    OUTCOME_NOT_RUN,
+    OUTCOME_RUNNING,
+    OUTCOME_DONE,
+    OUTCOME_NO_STATUS,
+    OUTCOME_GUARD_STOP,
+    VERDICT_NOT_FOUND,
+    VERDICT_CONNECT_FAILED,
+    VERDICT_ERROR,
+]

@@ -74,3 +74,52 @@ async def test_setup_sends_nothing_and_button_runs_probe(hass):
     assert "verdict" not in sensor.attributes
 
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_motion_entities_route_to_exchange(hass):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="eb:c0:e9:11:3d:a8",
+        title="Roller 3DA8",
+        data={CONF_ADDRESS: ADDRESS},
+    )
+    entry.add_to_hass(hass)
+
+    done = {
+        "address": ADDRESS,
+        "outcome": "done",
+        "position_before": 100.0,
+        "position_after": 90.0,
+        "steps": [],
+    }
+    with (
+        patch("custom_components.roller22g.async_goto", return_value=done) as goto,
+        patch("custom_components.roller22g.async_stop", return_value=done) as stop,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        goto.assert_not_called()
+        stop.assert_not_called()
+
+        assert hass.states.get("select.roller_3da8_command_header").state == "58"
+        await hass.services.async_call(
+            "select",
+            "select_option",
+            {"entity_id": "select.roller_3da8_command_header", "option": "78"},
+            blocking=True,
+        )
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": "number.roller_3da8_position", "value": 90},
+            blocking=True,
+        )
+        goto.assert_called_once_with(hass, ADDRESS, "78", 90)
+
+        await hass.services.async_call(
+            "button", "press", {"entity_id": "button.roller_3da8_stop"}, blocking=True
+        )
+        stop.assert_called_once_with(hass, ADDRESS, "78")
+
+    assert hass.states.get("number.roller_3da8_position").state == "90.0"
+    assert hass.states.get("sensor.roller_3da8_last_exchange").state == "done"

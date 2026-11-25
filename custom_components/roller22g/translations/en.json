@@ -25,6 +25,9 @@
     "button": {
       "probe": {
         "name": "Run read-only probe"
+      },
+      "stop": {
+        "name": "Stop"
       }
     },
     "sensor": {
@@ -41,6 +44,29 @@
           "connect_failed": "Connection failed",
           "error": "Error"
         }
+      },
+      "last_exchange": {
+        "name": "Last exchange",
+        "state": {
+          "not_run": "Not run",
+          "running": "Running",
+          "done": "Done",
+          "no_status": "No status reply",
+          "guard_stop": "Stopped by guard",
+          "device_not_found": "Motor not seen",
+          "connect_failed": "Connection failed",
+          "error": "Error"
+        }
+      }
+    },
+    "number": {
+      "target_position": {
+        "name": "Position"
+      }
+    },
+    "select": {
+      "command_header": {
+        "name": "Command header"
       }
     }
   }

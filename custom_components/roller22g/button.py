@@ -1,4 +1,4 @@
-"""Button that runs the read-only probe."""
+"""Buttons: read-only probe and stop."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ async def async_setup_entry(
     entry: Roller22GConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the probe button."""
-    async_add_entities([ProbeButton(entry)])
+    """Set up the buttons."""
+    async_add_entities([ProbeButton(entry), StopButton(entry)])
 
 
 class ProbeButton(Roller22GEntity, ButtonEntity):
@@ -31,3 +31,14 @@ class ProbeButton(Roller22GEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Run the probe."""
         await self._data.async_probe()
+
+
+class StopButton(Roller22GEntity, ButtonEntity):
+    """Sends the stop frame with the selected header."""
+
+    def __init__(self, entry: Roller22GConfigEntry) -> None:
+        super().__init__(entry, "stop")
+
+    async def async_press(self) -> None:
+        """Send stop."""
+        await self._data.async_stop()
