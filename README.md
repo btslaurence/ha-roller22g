@@ -37,7 +37,7 @@ A Home Assistant custom integration for roller blind motors that advertise over 
 | --- | --- |
 | Home Assistant | 2026.2 이상 |
 | 블루투스 | Home Assistant의 블루투스 통합이 동작하고, 모터에 연결할 수 있는 어댑터 또는 프록시가 있어야 합니다. |
-| 제조사 앱 | 검증을 실행하는 동안에는 종료해 두어야 합니다. 모터는 블루투스 연결을 동시에 하나만 받습니다. |
+| 제조사 앱 | 검증을 실행하는 동안에는 종료해 두어야 합니다. 같은 GATT 구성을 쓰는 모터는 블루투스 연결을 동시에 하나만 받는 것으로 알려져 있습니다. |
 
 ## 설치
 
