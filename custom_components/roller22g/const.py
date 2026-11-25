@@ -52,6 +52,7 @@ OUTCOMES = [
     VERDICT_ERROR,
 ]
 
-# Travel speed in percent per second, measured on one motor over short moves.
-SPEED_DOWN = 1.0
-SPEED_UP = 0.8
+# Travel speed in percent per second, measured on one motor: 41 % down in
+# 34.5 s and 33 % up in 35.4 s, each from a standstill.
+SPEED_DOWN = 1.19
+SPEED_UP = 0.94

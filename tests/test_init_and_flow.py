@@ -60,6 +60,8 @@ def _record(position, command_sent=False, outcome="done", error=None):
         "outcome": outcome,
         "error": error,
         "position": position,
+        "battery": None if position is None else "normal",
+        "status_extra": None if position is None else "9e 4e",
         "command_sent": command_sent,
         "steps": [],
     }
@@ -268,3 +270,30 @@ async def test_probe_button_runs_probe(hass, motor):
     sensor = registry.async_get_entity_id("sensor", DOMAIN, f"{ADDRESS}_probe_result")
     assert hass.states.get(sensor).state == "match_header_58"
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_battery_sensor_follows_status(hass, motor):
+    await _setup(hass)
+    state = hass.states.get("sensor.roller_3da8_battery")
+    assert state.state == "normal"
+    assert state.attributes["status_extra"] == "9e 4e"
+
+
+async def test_user_flow_wins_over_a_waiting_discovery_flow(hass):
+    from types import SimpleNamespace
+
+    from homeassistant.config_entries import SOURCE_BLUETOOTH
+
+    discovery = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_BLUETOOTH}, data=SimpleNamespace(address=ADDRESS)
+    )
+    assert discovery["type"] is FlowResultType.FORM
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    with patch("custom_components.roller22g.async_setup_entry", return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_ADDRESS: ADDRESS}
+        )
+        await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)

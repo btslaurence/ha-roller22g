@@ -105,16 +105,22 @@ class _Link:
         return record
 
 
+def status_of(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the last parsed status frame in a record, if any."""
+    for rx in reversed(record["rx"]):
+        if rx["parsed"].get("kind") == "status":
+            return rx["parsed"]
+    return None
+
+
 def position_of(record: dict[str, Any]) -> float | None:
     """Return the last position (percent, 100 = fully raised) in a record."""
-    for rx in reversed(record["rx"]):
-        parsed = rx["parsed"]
-        if parsed.get("kind") != "status":
-            continue
-        if "position_raw" in parsed:
-            return parsed["position_raw"] / 10
-        return float(parsed["position_percent"])
-    return None
+    parsed = status_of(record)
+    if parsed is None:
+        return None
+    if "position_raw" in parsed:
+        return parsed["position_raw"] / 10
+    return float(parsed["position_percent"])
 
 
 async def _async_run(
@@ -128,6 +134,8 @@ async def _async_run(
         "outcome": VERDICT_ERROR,
         "error": None,
         "position": None,
+        "battery": None,
+        "status_extra": None,
         "command_sent": False,
         "steps": [],
     }
@@ -159,9 +167,12 @@ async def _async_run(
             # Stop first: every moment spent reading is travel.
             await link.send("stop", build_stop(HEADER), AFTER_STOP_SECONDS)
             result["command_sent"] = True
-        result["position"] = position_of(
-            await link.send("status", status, STATUS_TIMEOUT_SECONDS, until_status=True)
-        )
+        record = await link.send("status", status, STATUS_TIMEOUT_SECONDS, until_status=True)
+        result["position"] = position_of(record)
+        parsed = status_of(record)
+        if parsed is not None:
+            result["battery"] = parsed["battery"]
+            result["status_extra"] = parsed.get("extra")
         if action == "goto":
             assert target is not None
             await link.send("goto", build_goto(HEADER, target), AFTER_WRITE_SECONDS)

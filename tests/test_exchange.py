@@ -117,6 +117,8 @@ async def test_read_reports_position(hass):
     assert motor.written == [STATUS]
     assert result["outcome"] == "done"
     assert result["position"] == 89.9
+    assert result["battery"] == "normal"
+    assert result["status_extra"] == "9e 4e"
     assert result["command_sent"] is False
 
 

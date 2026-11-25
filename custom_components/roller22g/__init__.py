@@ -75,6 +75,8 @@ class Roller22GData:
         self.exchange: dict[str, Any] | None = None
         # Position: the last value the motor reported, and the move in progress.
         self.position: float | None = None
+        self.battery: str | None = None
+        self.status_extra: str | None = None
         self.target: float | None = None
         self._move_from: float | None = None
         self._move_started: float | None = None
@@ -148,6 +150,9 @@ class Roller22GData:
                 raise
             finally:
                 self.outcome = self.exchange["outcome"] if self.exchange else VERDICT_ERROR
+                if self.exchange and self.exchange.get("battery") is not None:
+                    self.battery = self.exchange["battery"]
+                    self.status_extra = self.exchange.get("status_extra")
                 self._notify()
             return self.exchange
 

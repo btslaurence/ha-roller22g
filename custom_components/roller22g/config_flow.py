@@ -74,7 +74,11 @@ class Roller22GConfigFlow(ConfigFlow, domain=DOMAIN):
             if address is None:
                 errors[CONF_ADDRESS] = "invalid_address"
             else:
-                await self.async_set_unique_id(format_mac(address))
+                # A discovery flow for the same motor may be waiting; adding
+                # the motor by hand takes precedence over it.
+                await self.async_set_unique_id(
+                    format_mac(address), raise_on_progress=False
+                )
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title=_title(address), data={CONF_ADDRESS: address}

@@ -103,6 +103,9 @@ def parse_response(frame: bytes) -> dict[str, Any]:
         )
         if len(payload) >= 5:
             parsed["position_raw"] = payload[3] | (payload[4] << 8)
+        if len(payload) > 5:
+            # Bytes after the documented fields; meaning not known.
+            parsed["extra"] = payload[5:].hex(" ")
         return parsed
 
     if opcode == OP_LOGIN_RESULT:

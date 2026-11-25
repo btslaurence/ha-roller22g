@@ -31,6 +31,15 @@
       }
     },
     "sensor": {
+      "battery": {
+        "name": "Battery",
+        "state": {
+          "normal": "Normal",
+          "low": "Low",
+          "none": "No battery",
+          "unknown": "Unknown"
+        }
+      },
       "probe_result": {
         "name": "Probe result",
         "state": {

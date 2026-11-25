@@ -39,6 +39,14 @@ def test_parse_status_push():
     assert parsed["limits_set"] is True
     assert parsed["direction_reversed"] is False
     assert parsed["battery"] == "normal"
+    assert "extra" not in parsed
+
+
+def test_parse_status_keeps_trailing_bytes():
+    # Frame captured from a ROLLER22G motor: two bytes after the raw position.
+    parsed = parse_response(bytes.fromhex("ff010203d10264e8039e4e"))
+    assert parsed["position_raw"] == 1000
+    assert parsed["extra"] == "9e 4e"
 
 
 def test_parse_status_battery_low():

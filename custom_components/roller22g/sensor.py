@@ -20,7 +20,41 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the sensors."""
-    async_add_entities([ProbeResultSensor(entry), LastExchangeSensor(entry)])
+    async_add_entities(
+        [BatterySensor(entry), ProbeResultSensor(entry), LastExchangeSensor(entry)]
+    )
+
+
+class BatterySensor(Roller22GEntity, SensorEntity):
+    """Battery state as the motor reports it in its status frame.
+
+    The motor reports one of three states, not a charge level.
+    """
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["normal", "low", "none", "unknown"]
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, entry: Roller22GConfigEntry) -> None:
+        super().__init__(entry, "battery")
+
+    async def async_added_to_hass(self) -> None:
+        """Follow state changes."""
+        self.async_on_remove(self._data.async_add_listener(self._handle_update))
+
+    @callback
+    def _handle_update(self) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the battery state from the last status frame."""
+        return self._data.battery
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the undocumented trailing bytes of the status frame."""
+        return {"status_extra": self._data.status_extra}
 
 
 class ProbeResultSensor(Roller22GEntity, SensorEntity):
