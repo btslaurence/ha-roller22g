@@ -1,4 +1,4 @@
-"""Buttons: read-only probe and stop."""
+"""Diagnostic buttons: read the position, run the read-only probe."""
 
 from __future__ import annotations
 
@@ -17,13 +17,27 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the buttons."""
-    async_add_entities([ProbeButton(entry), StopButton(entry)])
+    async_add_entities([RefreshButton(entry), ProbeButton(entry)])
+
+
+class RefreshButton(Roller22GEntity, ButtonEntity):
+    """Reads the position from the motor."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, entry: Roller22GConfigEntry) -> None:
+        super().__init__(entry, "refresh")
+
+    async def async_press(self) -> None:
+        """Read the position."""
+        await self._data.async_refresh()
 
 
 class ProbeButton(Roller22GEntity, ButtonEntity):
     """Runs login and read status against the motor. Does not move it."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, entry: Roller22GConfigEntry) -> None:
         super().__init__(entry, "probe")
@@ -31,14 +45,3 @@ class ProbeButton(Roller22GEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Run the probe."""
         await self._data.async_probe()
-
-
-class StopButton(Roller22GEntity, ButtonEntity):
-    """Sends the stop frame with the selected header."""
-
-    def __init__(self, entry: Roller22GConfigEntry) -> None:
-        super().__init__(entry, "stop")
-
-    async def async_press(self) -> None:
-        """Send stop."""
-        await self._data.async_stop()

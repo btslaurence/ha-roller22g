@@ -29,6 +29,7 @@ class ProbeResultSensor(Roller22GEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = VERDICTS
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     # The frame log is for one-off inspection, not for history.
     _unrecorded_attributes = frozenset({"steps", "characteristics"})
 
@@ -58,7 +59,7 @@ class ProbeResultSensor(Roller22GEntity, SensorEntity):
 
 
 class LastExchangeSensor(Roller22GEntity, SensorEntity):
-    """Outcome of the last stop or move, with the recorded frames as attributes."""
+    """Outcome of the last Bluetooth exchange, with its frames as attributes."""
 
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = OUTCOMES

@@ -4,14 +4,14 @@
     "step": {
       "user": {
         "title": "Add a ROLLER22G motor",
-        "description": "Enter the Bluetooth address of the motor. Nothing is sent to the motor when it is added.\n\nMotors currently seen: {seen}",
+        "description": "Enter the Bluetooth address of the motor. Adding it reads the position once and does not move the motor.\n\nMotors currently seen: {seen}",
         "data": {
           "address": "Bluetooth address"
         }
       },
       "confirm": {
         "title": "Add a ROLLER22G motor",
-        "description": "Add the motor at {address}? Nothing is sent to the motor when it is added."
+        "description": "Add the motor at {address}? Adding it reads the position once and does not move the motor."
       }
     },
     "error": {
@@ -23,11 +23,11 @@
   },
   "entity": {
     "button": {
+      "refresh": {
+        "name": "Read position"
+      },
       "probe": {
         "name": "Run read-only probe"
-      },
-      "stop": {
-        "name": "Stop"
       }
     },
     "sensor": {
@@ -51,23 +51,11 @@
           "not_run": "Not run",
           "running": "Running",
           "done": "Done",
-          "stopped": "Stopped on request",
           "no_status": "No status reply",
-          "guard_stop": "Stopped by guard",
           "device_not_found": "Motor not seen",
           "connect_failed": "Connection failed",
           "error": "Error"
         }
-      }
-    },
-    "number": {
-      "target_position": {
-        "name": "Position"
-      }
-    },
-    "select": {
-      "command_header": {
-        "name": "Command header"
       }
     }
   }

@@ -43,93 +43,67 @@ async def test_duplicate_is_aborted(hass):
     assert result["type"] is FlowResultType.ABORT
 
 
-async def test_setup_sends_nothing_and_button_runs_probe(hass):
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        unique_id="eb:c0:e9:11:3d:a8",
-        title="Roller 3DA8",
-        data={CONF_ADDRESS: ADDRESS},
-    )
-    entry.add_to_hass(hass)
+import asyncio
 
-    fake = {"address": ADDRESS, "verdict": "match_header_58", "error": None, "steps": [{"step": "login"}]}
-    with patch(
-        "custom_components.roller22g.async_run_probe", return_value=fake
-    ) as run:
-        assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
-        run.assert_not_called()
+import pytest
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 
-        sensor = hass.states.get("sensor.roller_3da8_probe_result")
-        assert sensor is not None and sensor.state == "not_run"
+import custom_components.roller22g as integration
 
-        await hass.services.async_call(
-            "button", "press", {"entity_id": "button.roller_3da8_run_read_only_probe"}, blocking=True
-        )
-        run.assert_called_once_with(hass, ADDRESS)
-
-    sensor = hass.states.get("sensor.roller_3da8_probe_result")
-    assert sensor.state == "match_header_58"
-    assert sensor.attributes["steps"] == [{"step": "login"}]
-    assert "verdict" not in sensor.attributes
-
-    assert await hass.config_entries.async_unload(entry.entry_id)
+COVER = "cover.roller_3da8"
 
 
-async def test_motion_entities_route_to_exchange(hass):
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        unique_id="eb:c0:e9:11:3d:a8",
-        title="Roller 3DA8",
-        data={CONF_ADDRESS: ADDRESS},
-    )
-    entry.add_to_hass(hass)
-
-    done = {
+def _record(position, command_sent=False, outcome="done", error=None):
+    return {
         "address": ADDRESS,
-        "outcome": "done",
-        "position_before": 100.0,
-        "position_after": 90.0,
+        "outcome": outcome,
+        "error": error,
+        "position": position,
+        "command_sent": command_sent,
         "steps": [],
     }
-    with (
-        patch("custom_components.roller22g.async_goto", return_value=done) as goto,
-        patch("custom_components.roller22g.async_stop", return_value=done) as stop,
-    ):
-        assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
-        goto.assert_not_called()
-        stop.assert_not_called()
-
-        assert hass.states.get("select.roller_3da8_command_header").state == "58"
-        await hass.services.async_call(
-            "select",
-            "select_option",
-            {"entity_id": "select.roller_3da8_command_header", "option": "78"},
-            blocking=True,
-        )
-        await hass.services.async_call(
-            "number",
-            "set_value",
-            {"entity_id": "number.roller_3da8_position", "value": 90},
-            blocking=True,
-        )
-        await hass.async_block_till_done(wait_background_tasks=True)
-        goto.assert_called_once()
-        assert goto.call_args.args[:4] == (hass, ADDRESS, "78", 90)
-
-        await hass.services.async_call(
-            "button", "press", {"entity_id": "button.roller_3da8_stop"}, blocking=True
-        )
-        stop.assert_called_once_with(hass, ADDRESS, "78")
-
-    assert hass.states.get("number.roller_3da8_position").state == "90.0"
-    assert hass.states.get("sensor.roller_3da8_last_exchange").state == "done"
 
 
-async def test_stop_during_move_sets_event_instead_of_new_exchange(hass):
-    import asyncio
+class FakeMotor:
+    """Stands in for the exchange functions; moves instantly."""
 
+    def __init__(self, position=100.0):
+        self.position = position
+        self.calls = []
+        self.fail_command = False
+
+    async def read(self, hass, address):
+        self.calls.append(("read",))
+        return _record(self.position)
+
+    async def goto(self, hass, address, percent):
+        self.calls.append(("goto", percent))
+        if self.fail_command:
+            return _record(None, outcome="connect_failed", error="nope")
+        before = self.position
+        self.position = float(percent)
+        return _record(before, command_sent=True)
+
+    async def stop(self, hass, address):
+        self.calls.append(("stop",))
+        return _record(self.position, command_sent=True)
+
+
+@pytest.fixture
+def motor(monkeypatch):
+    fake = FakeMotor()
+    monkeypatch.setattr(integration, "async_read", fake.read)
+    monkeypatch.setattr(integration, "async_goto", fake.goto)
+    monkeypatch.setattr(integration, "async_stop", fake.stop)
+    monkeypatch.setattr(integration, "CHECK_MARGIN", 0.0)
+    monkeypatch.setattr(integration, "SPEED_DOWN", 100000.0)
+    monkeypatch.setattr(integration, "SPEED_UP", 100000.0)
+    monkeypatch.setattr(integration, "RECHECK_MIN", 0.0)
+    return fake
+
+
+async def _setup(hass):
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="eb:c0:e9:11:3d:a8",
@@ -137,41 +111,160 @@ async def test_stop_during_move_sets_event_instead_of_new_exchange(hass):
         data={CONF_ADDRESS: ADDRESS},
     )
     entry.add_to_hass(hass)
-    seen = {}
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    return entry
 
-    async def slow_goto(hass_, address, header, percent, stop_event):
-        seen["event"] = stop_event
-        await stop_event.wait()
-        return {
-            "address": address,
-            "outcome": "stopped",
-            "position_before": 100.0,
-            "position_after": 88.0,
-            "steps": [],
-        }
 
-    with (
-        patch("custom_components.roller22g.async_goto", side_effect=slow_goto),
-        patch("custom_components.roller22g.async_stop") as stop,
-    ):
+async def test_setup_reads_position_once_and_sends_no_command(hass, motor):
+    await _setup(hass)
+
+    assert motor.calls == [("read",)]
+    state = hass.states.get(COVER)
+    assert state.state == "open"
+    assert state.attributes["current_position"] == 100
+    assert state.attributes["position_is_estimate"] is False
+
+
+async def test_set_position_sends_one_command_then_checks_once(hass, motor):
+    entry = await _setup(hass)
+    motor.calls.clear()
+
+    await hass.services.async_call(
+        "cover", "set_cover_position", {"entity_id": COVER, "position": 80}, blocking=True
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert motor.calls == [("goto", 80), ("read",)]
+    state = hass.states.get(COVER)
+    assert state.state == "open"
+    assert state.attributes["current_position"] == 80
+    assert state.attributes["reported_position"] == 80.0
+    assert state.attributes["position_is_estimate"] is False
+    assert entry.runtime_data.moving is False
+
+
+async def test_open_and_close_map_to_100_and_0(hass, motor):
+    await _setup(hass)
+    motor.calls.clear()
+
+    await hass.services.async_call("cover", "close_cover", {"entity_id": COVER}, blocking=True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(COVER).state == "closed"
+
+    await hass.services.async_call("cover", "open_cover", {"entity_id": COVER}, blocking=True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(COVER).state == "open"
+    assert [call for call in motor.calls if call[0] == "goto"] == [("goto", 0), ("goto", 100)]
+
+
+async def test_moving_state_and_estimate_while_travelling(hass, motor, monkeypatch):
+    monkeypatch.setattr(integration, "SPEED_DOWN", 1.0)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(integration, "_now", lambda: clock["now"])
+    entry = await _setup(hass)
+
+    await hass.services.async_call(
+        "cover", "set_cover_position", {"entity_id": COVER, "position": 80}, blocking=True
+    )
+    data = entry.runtime_data
+    assert hass.states.get(COVER).state == "closing"
+    assert data.estimated_position == 100.0
+
+    clock["now"] += 5
+    assert data.estimated_position == 95.0
+    clock["now"] += 100
+    assert data.estimated_position == 80.0
+
+    # The check is still waiting out the travel time; stop cancels it.
+    motor.position = 91.0
+    await hass.services.async_call("cover", "stop_cover", {"entity_id": COVER}, blocking=True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert motor.calls[-1] == ("stop",)
+    state = hass.states.get(COVER)
+    assert state.state == "open"
+    assert state.attributes["current_position"] == 91
+    assert state.attributes["position_is_estimate"] is False
+    assert data.moving is False
+
+
+async def test_blind_that_stops_short_shows_its_real_position(hass, motor, monkeypatch):
+    await _setup(hass)
+
+    async def stuck_goto(hass_, address, percent):
+        motor.calls.append(("goto", percent))
+        motor.position = 88.0  # obstructed: never reaches the target
+        return _record(100.0, command_sent=True)
+
+    monkeypatch.setattr(integration, "async_goto", stuck_goto)
+    motor.calls.clear()
+    await hass.services.async_call(
+        "cover", "set_cover_position", {"entity_id": COVER, "position": 50}, blocking=True
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    # One read sees 88, a second read sees 88 again and accepts it.
+    assert motor.calls == [("goto", 50), ("read",), ("read",)]
+    assert hass.states.get(COVER).attributes["current_position"] == 88
+
+
+async def test_failed_command_raises_and_leaves_state_alone(hass, motor):
+    entry = await _setup(hass)
+    motor.fail_command = True
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "cover", "set_cover_position", {"entity_id": COVER, "position": 50}, blocking=True
+        )
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert entry.runtime_data.moving is False
+    assert hass.states.get(COVER).attributes["current_position"] == 100
+    assert hass.states.get("sensor.roller_3da8_last_exchange").state == "connect_failed"
+
+
+async def test_entities_of_earlier_versions_are_removed(hass, motor):
+    registry = er.async_get(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="eb:c0:e9:11:3d:a8",
+        title="Roller 3DA8",
+        data={CONF_ADDRESS: ADDRESS},
+    )
+    entry.add_to_hass(hass)
+    old = registry.async_get_or_create(
+        "number", DOMAIN, f"{ADDRESS}_target_position", config_entry=entry
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert registry.async_get(old.entity_id) is None
+    assert hass.states.get(COVER) is not None
+
+
+async def test_probe_button_runs_probe(hass, motor):
+    registry = er.async_get(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="eb:c0:e9:11:3d:a8",
+        title="Roller 3DA8",
+        data={CONF_ADDRESS: ADDRESS},
+    )
+    entry.add_to_hass(hass)
+    # Present (and enabled) from an earlier version, as on the real install.
+    for domain, key in (("button", "probe"), ("sensor", "probe_result")):
+        registry.async_get_or_create(domain, DOMAIN, f"{ADDRESS}_{key}", config_entry=entry)
+
+    fake = {"address": ADDRESS, "verdict": "match_header_58", "error": None, "steps": []}
+    with patch("custom_components.roller22g.async_run_probe", return_value=fake) as run:
         assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
-
-        await hass.services.async_call(
-            "number",
-            "set_value",
-            {"entity_id": "number.roller_3da8_position", "value": 50},
-            blocking=True,
-        )
-        await asyncio.sleep(0)
-        assert hass.states.get("sensor.roller_3da8_last_exchange").state == "running"
-
-        await hass.services.async_call(
-            "button", "press", {"entity_id": "button.roller_3da8_stop"}, blocking=True
-        )
         await hass.async_block_till_done(wait_background_tasks=True)
-        stop.assert_not_called()
+        run.assert_not_called()
+        button = registry.async_get_entity_id("button", DOMAIN, f"{ADDRESS}_probe")
+        await hass.services.async_call("button", "press", {"entity_id": button}, blocking=True)
+        run.assert_called_once_with(hass, ADDRESS)
 
-    assert seen["event"].is_set()
-    assert hass.states.get("sensor.roller_3da8_last_exchange").state == "stopped"
-    assert hass.states.get("number.roller_3da8_position").state == "88.0"
+    sensor = registry.async_get_entity_id("sensor", DOMAIN, f"{ADDRESS}_probe_result")
+    assert hass.states.get(sensor).state == "match_header_58"
+    assert await hass.config_entries.async_unload(entry.entry_id)

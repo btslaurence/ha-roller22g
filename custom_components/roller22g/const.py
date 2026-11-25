@@ -36,26 +36,22 @@ VERDICTS = [
     VERDICT_ERROR,
 ]
 
-# Command headers that can be selected for motion frames.
-HEADERS = {"58": bytes.fromhex("ff58ea41"), "78": bytes.fromhex("ff78ea41")}
-DEFAULT_HEADER = "58"
-
-# Outcomes reported for a stop or go-to-position exchange.
+# Outcomes of a Bluetooth exchange (read, go to position, stop).
 OUTCOME_NOT_RUN = "not_run"
 OUTCOME_RUNNING = "running"
 OUTCOME_DONE = "done"
-OUTCOME_STOPPED = "stopped"
 OUTCOME_NO_STATUS = "no_status"
-OUTCOME_GUARD_STOP = "guard_stop"
 
 OUTCOMES = [
     OUTCOME_NOT_RUN,
     OUTCOME_RUNNING,
     OUTCOME_DONE,
-    OUTCOME_STOPPED,
     OUTCOME_NO_STATUS,
-    OUTCOME_GUARD_STOP,
     VERDICT_NOT_FOUND,
     VERDICT_CONNECT_FAILED,
     VERDICT_ERROR,
 ]
+
+# Travel speed in percent per second, measured on one motor over short moves.
+SPEED_DOWN = 1.0
+SPEED_UP = 0.8
